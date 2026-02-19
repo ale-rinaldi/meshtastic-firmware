@@ -53,3 +53,5 @@ CMakeLists.txt
 
 # PYTHONPATH used by the Nix shell
 .python3
+_codeql_detected_source_root
+
