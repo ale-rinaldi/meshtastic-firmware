@@ -55,4 +55,3 @@ CMakeLists.txt
 .python3
 _codeql_detected_source_root
 
-# Stable branch ready: copilot/fix-message-forwarding-issue-stable
