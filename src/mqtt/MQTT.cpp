@@ -741,41 +741,47 @@ void MQTT::onSend(const meshtastic_MeshPacket &mp_encrypted, const meshtastic_Me
 {
     if (mp_encrypted.via_mqtt)
         return; // Don't send messages that came from MQTT back into MQTT
-    bool uplinkEnabled = false;
-    for (int i = 0; i <= 7; i++) {
-        if (channels.getByIndex(i).settings.uplink_enabled)
-            uplinkEnabled = true;
+
+    if (!moduleConfig.mqtt.forward_all) {
+        bool uplinkEnabled = false;
+        for (int i = 0; i <= 7; i++) {
+            if (channels.getByIndex(i).settings.uplink_enabled)
+                uplinkEnabled = true;
+        }
+        if (!uplinkEnabled)
+            return; // no channels have an uplink enabled
     }
-    if (!uplinkEnabled)
-        return; // no channels have an uplink enabled
     auto &ch = channels.getByIndex(chIndex);
 
     // mp_decoded will not be decoded when it's PKI encrypted and not directed to us
     if (mp_decoded.which_payload_variant == meshtastic_MeshPacket_decoded_tag) {
-        // For uplinking other's packets, check if it's not OK to MQTT or if it's an older packet without the bitfield
-        bool dontUplink = !mp_decoded.decoded.has_bitfield || !(mp_decoded.decoded.bitfield & BITFIELD_OK_TO_MQTT_MASK);
-        // Respect the DontMqttMeBro flag for other nodes' packets on public MQTT servers
-        if (!isFromUs(&mp_decoded) && !isMqttServerAddressPrivate && dontUplink) {
-            LOG_INFO("MQTT onSend - Not forwarding packet due to DontMqttMeBro flag");
-            return;
-        }
+        if (!moduleConfig.mqtt.forward_all) {
+            // For uplinking other's packets, check if it's not OK to MQTT or if it's an older packet without the bitfield
+            bool dontUplink = !mp_decoded.decoded.has_bitfield || !(mp_decoded.decoded.bitfield & BITFIELD_OK_TO_MQTT_MASK);
+            // Respect the DontMqttMeBro flag for other nodes' packets on public MQTT servers
+            if (!isFromUs(&mp_decoded) && !isMqttServerAddressPrivate && dontUplink) {
+                LOG_INFO("MQTT onSend - Not forwarding packet due to DontMqttMeBro flag");
+                return;
+            }
 
-        if (isConfiguredForDefaultServer && (mp_decoded.decoded.portnum == meshtastic_PortNum_RANGE_TEST_APP ||
-                                             mp_decoded.decoded.portnum == meshtastic_PortNum_DETECTION_SENSOR_APP)) {
-            LOG_DEBUG("MQTT onSend - Ignoring range test or detection sensor message on public mqtt");
-            return;
+            if (isConfiguredForDefaultServer && (mp_decoded.decoded.portnum == meshtastic_PortNum_RANGE_TEST_APP ||
+                                                 mp_decoded.decoded.portnum == meshtastic_PortNum_DETECTION_SENSOR_APP)) {
+                LOG_DEBUG("MQTT onSend - Ignoring range test or detection sensor message on public mqtt");
+                return;
+            }
         }
     }
     // Either encrypted packet (we couldn't decrypt) is marked as pki_encrypted, or we could decode the PKI encrypted packet
     bool isPKIEncrypted = mp_encrypted.pki_encrypted || mp_decoded.pki_encrypted;
-    // If it was to a channel, check uplink enabled, else must be pki_encrypted
-    if (!(ch.settings.uplink_enabled || isPKIEncrypted))
+    // If it was to a channel, check uplink enabled, else must be pki_encrypted (unless forward_all bypasses this)
+    if (!moduleConfig.mqtt.forward_all && !(ch.settings.uplink_enabled || isPKIEncrypted))
         return;
     const char *channelId = isPKIEncrypted ? "PKI" : channels.getGlobalId(chIndex);
 
     LOG_DEBUG("MQTT onSend - Publish ");
     const meshtastic_MeshPacket *p;
-    if (moduleConfig.mqtt.encryption_enabled) {
+    // In forward_all mode always publish the raw (encrypted) packet so the original payload is always present
+    if (moduleConfig.mqtt.encryption_enabled || moduleConfig.mqtt.forward_all) {
         p = &mp_encrypted;
         LOG_DEBUG("encrypted message");
     } else if (mp_decoded.which_payload_variant == meshtastic_MeshPacket_decoded_tag) {
@@ -801,7 +807,8 @@ void MQTT::onSend(const meshtastic_MeshPacket &mp_encrypted, const meshtastic_Me
 
 #if !defined(ARCH_NRF52) ||                                                                                                      \
     defined(NRF52_USE_JSON) // JSON is not supported on nRF52, see issue #2804 ### Fixed by using ArduinoJson ###
-        if (!moduleConfig.mqtt.json_enabled)
+        // In forward_all mode also publish JSON alongside the encrypted packet (provides the decoded payload for air logging)
+        if (!moduleConfig.mqtt.json_enabled && !moduleConfig.mqtt.forward_all)
             return;
         // handle json topic
         auto jsonString = MeshPacketSerializer::JsonSerialize(&mp_decoded);
