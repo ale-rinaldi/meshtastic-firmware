@@ -746,10 +746,17 @@ void Router::handleReceived(meshtastic_MeshPacket *p, RxSource src)
         if (decodedState == DecodeState::DECODE_FAILURE && moduleConfig.mqtt.encryption_enabled && p->channel == 0x00 &&
             !isBroadcast(p->to) && !isToUs(p))
             p_encrypted->pki_encrypted = true;
-        // After potentially altering it, publish received message to MQTT if we're not the original transmitter of the packet
-        if ((decodedState == DecodeState::DECODE_SUCCESS || p_encrypted->pki_encrypted) && moduleConfig.mqtt.enabled &&
-            !isFromUs(p) && mqtt)
-            mqtt->onSend(*p_encrypted, *p, p->channel);
+        // After potentially altering it, publish received message to MQTT
+        if (moduleConfig.mqtt.enabled && mqtt) {
+            if (moduleConfig.mqtt.forward_all) {
+                // In forward_all mode publish every heard packet regardless of origin or decode state
+                ChannelIndex chIdx =
+                    (decodedState == DecodeState::DECODE_SUCCESS || p_encrypted->pki_encrypted) ? p->channel : 0;
+                mqtt->onSend(*p_encrypted, *p, chIdx);
+            } else if ((decodedState == DecodeState::DECODE_SUCCESS || p_encrypted->pki_encrypted) && !isFromUs(p)) {
+                mqtt->onSend(*p_encrypted, *p, p->channel);
+            }
+        }
 #endif
     }
 
@@ -797,6 +804,21 @@ void Router::perhapsHandleReceived(meshtastic_MeshPacket *p)
 
     if (shouldFilterReceived(p)) {
         LOG_DEBUG("Incoming msg was filtered from 0x%x", p->from);
+#if !MESHTASTIC_EXCLUDE_MQTT
+        // In forward_all mode publish filtered (duplicate/relay) packets to MQTT as well, since the goal is to
+        // capture every physical transmission heard on radio regardless of deduplication state.
+        if (moduleConfig.mqtt.enabled && moduleConfig.mqtt.forward_all && mqtt) {
+            meshtastic_MeshPacket *p_encrypted_copy = packetPool.allocCopy(*p);
+            auto decodedState = perhapsDecode(p);
+            if (decodedState == DecodeState::DECODE_FAILURE && moduleConfig.mqtt.encryption_enabled && p->channel == 0x00 &&
+                !isBroadcast(p->to) && !isToUs(p))
+                p_encrypted_copy->pki_encrypted = true;
+            ChannelIndex chIdx =
+                (decodedState == DecodeState::DECODE_SUCCESS || p_encrypted_copy->pki_encrypted) ? p->channel : 0;
+            mqtt->onSend(*p_encrypted_copy, *p, chIdx);
+            packetPool.release(p_encrypted_copy);
+        }
+#endif
         packetPool.release(p);
         return;
     }

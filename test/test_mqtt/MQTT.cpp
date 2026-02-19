@@ -200,6 +200,9 @@ class MockPubSubServer : public WiFiClient
 
             if (topic == kTextTopic) {
                 published_.emplace_back(std::move(topic), std::string(message.data(), message.size()));
+            } else if (topic.find("/json/") != std::string::npos) {
+                // JSON topics carry a plain JSON string, not a service envelope protobuf
+                published_.emplace_back(std::move(topic), std::string(message.data(), message.size()));
             } else {
                 published_.emplace_back(
                     std::move(topic), DecodedServiceEnvelope(reinterpret_cast<const uint8_t *>(message.data()), message.size()));
@@ -475,6 +478,90 @@ void test_noDetectionSensorAppOnDefaultServer(void)
     mqtt->onSend(encrypted, p, 0);
 
     TEST_ASSERT_TRUE(pubsub->published_.empty());
+}
+
+// With forward_all enabled, packets without the OK-to-MQTT bit are forwarded anyway.
+void test_forwardAllBypassesDontMqttMe(void)
+{
+    moduleConfig.mqtt.forward_all = true;
+    meshtastic_MeshPacket p = decoded;
+    p.decoded.bitfield = 0;
+    p.decoded.has_bitfield = 0;
+
+    mqtt->onSend(encrypted, p, 0);
+
+    TEST_ASSERT_FALSE(pubsub->published_.empty());
+    const auto &[topic, payload] = pubsub->published_.front();
+    const DecodedServiceEnvelope &env = std::get<DecodedServiceEnvelope>(payload);
+    TEST_ASSERT_TRUE(env.validDecode);
+    // forward_all always publishes the encrypted packet as the primary payload
+    TEST_ASSERT_EQUAL(encrypted.id, env.packet->id);
+}
+
+// With forward_all enabled, range-test app packets are forwarded on the default server.
+void test_forwardAllBypassesRangeTestApp(void)
+{
+    moduleConfig.mqtt.forward_all = true;
+    meshtastic_MeshPacket p = decoded;
+    p.decoded.portnum = meshtastic_PortNum_RANGE_TEST_APP;
+
+    mqtt->onSend(encrypted, p, 0);
+
+    TEST_ASSERT_FALSE(pubsub->published_.empty());
+}
+
+// With forward_all enabled, packets are forwarded even when the channel has uplink disabled.
+void test_forwardAllBypassesUplinkCheck(void)
+{
+    moduleConfig.mqtt.forward_all = true;
+    channelFile.channels[0].settings.uplink_enabled = false;
+
+    mqtt->onSend(encrypted, decoded, 0);
+
+    TEST_ASSERT_FALSE(pubsub->published_.empty());
+    const auto &[topic, payload] = pubsub->published_.front();
+    const DecodedServiceEnvelope &env = std::get<DecodedServiceEnvelope>(payload);
+    // forward_all always publishes the encrypted packet as the primary payload
+    TEST_ASSERT_EQUAL(encrypted.id, env.packet->id);
+}
+
+// With forward_all enabled, the encrypted primary packet AND a JSON decoded packet are both published.
+void test_forwardAllPublishesBothEncryptedAndJson(void)
+{
+    moduleConfig.mqtt.forward_all = true;
+
+    mqtt->onSend(encrypted, decoded, 0);
+
+    // Expect at least 2 published messages: the encrypted protobuf and the JSON decoded payload
+    TEST_ASSERT_TRUE(pubsub->published_.size() >= 2);
+
+    // First message should be the encrypted protobuf on the crypt topic
+    const auto &[protoTopic, protoPayload] = pubsub->published_.front();
+    TEST_ASSERT_TRUE(protoTopic.find("/e/") != std::string::npos);
+    const DecodedServiceEnvelope &env = std::get<DecodedServiceEnvelope>(protoPayload);
+    TEST_ASSERT_TRUE(env.validDecode);
+    TEST_ASSERT_EQUAL(encrypted.id, env.packet->id);
+
+    // Second message should be JSON on the json topic
+    const auto &[jsonTopic, jsonPayload] = pubsub->published_.back();
+    TEST_ASSERT_TRUE(jsonTopic.find("/json/") != std::string::npos);
+    const std::string &jsonStr = std::get<std::string>(jsonPayload);
+    TEST_ASSERT_TRUE(jsonStr.length() > 0);
+}
+
+// With forward_all enabled, an encrypted-only (undecoded) packet is still forwarded.
+void test_forwardAllPublishesUndecoded(void)
+{
+    moduleConfig.mqtt.forward_all = true;
+
+    // Pass an encrypted packet as both arguments (simulating a packet we could not decrypt)
+    mqtt->onSend(encrypted, encrypted, 0);
+
+    // The encrypted packet should have been published even though there is no decoded payload
+    TEST_ASSERT_FALSE(pubsub->published_.empty());
+    const auto &[topic, payload] = pubsub->published_.front();
+    const DecodedServiceEnvelope &env = std::get<DecodedServiceEnvelope>(payload);
+    TEST_ASSERT_EQUAL(encrypted.id, env.packet->id);
 }
 
 // Test that a MeshPacket is queued while the MQTT server is disconnected.
@@ -885,6 +972,11 @@ void setup()
     RUN_TEST(test_okToMqttOnPrivateServer);
     RUN_TEST(test_noRangeTestAppOnDefaultServer);
     RUN_TEST(test_noDetectionSensorAppOnDefaultServer);
+    RUN_TEST(test_forwardAllBypassesDontMqttMe);
+    RUN_TEST(test_forwardAllBypassesRangeTestApp);
+    RUN_TEST(test_forwardAllBypassesUplinkCheck);
+    RUN_TEST(test_forwardAllPublishesBothEncryptedAndJson);
+    RUN_TEST(test_forwardAllPublishesUndecoded);
     RUN_TEST(test_sendQueued);
     RUN_TEST(test_reconnectProxyDoesNotReconnectMqtt);
     RUN_TEST(test_receiveEmptyMeshPacket);

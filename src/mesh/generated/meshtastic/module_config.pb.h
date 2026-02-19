@@ -154,6 +154,10 @@ typedef struct _meshtastic_ModuleConfig_MQTTConfig {
     /* Settings for reporting information about our node to a map via MQTT */
     bool has_map_report_settings;
     meshtastic_ModuleConfig_MapReportSettings map_report_settings;
+    /* If true, forward all packets heard on radio to MQTT, bypassing all filtering (uplink, DontMqttMeBro, etc.).
+ When this mode is active, the raw (encrypted) packet is always published; if decoding succeeds the decoded
+ payload is also published as JSON on the json topic, giving both the original and decoded payload for air-logging. */
+    bool forward_all;
 } meshtastic_ModuleConfig_MQTTConfig;
 
 /* NeighborInfoModule Config */
@@ -515,7 +519,7 @@ extern "C" {
 
 /* Initializer values for message structs */
 #define meshtastic_ModuleConfig_init_default     {0, {meshtastic_ModuleConfig_MQTTConfig_init_default}}
-#define meshtastic_ModuleConfig_MQTTConfig_init_default {0, "", "", "", 0, 0, 0, "", 0, 0, false, meshtastic_ModuleConfig_MapReportSettings_init_default}
+#define meshtastic_ModuleConfig_MQTTConfig_init_default {0, "", "", "", 0, 0, 0, "", 0, 0, false, meshtastic_ModuleConfig_MapReportSettings_init_default, 0}
 #define meshtastic_ModuleConfig_MapReportSettings_init_default {0, 0, 0}
 #define meshtastic_ModuleConfig_RemoteHardwareConfig_init_default {0, 0, 0, {meshtastic_RemoteHardwarePin_init_default, meshtastic_RemoteHardwarePin_init_default, meshtastic_RemoteHardwarePin_init_default, meshtastic_RemoteHardwarePin_init_default}}
 #define meshtastic_ModuleConfig_NeighborInfoConfig_init_default {0, 0, 0}
@@ -531,7 +535,7 @@ extern "C" {
 #define meshtastic_ModuleConfig_AmbientLightingConfig_init_default {0, 0, 0, 0, 0}
 #define meshtastic_RemoteHardwarePin_init_default {0, "", _meshtastic_RemoteHardwarePinType_MIN}
 #define meshtastic_ModuleConfig_init_zero        {0, {meshtastic_ModuleConfig_MQTTConfig_init_zero}}
-#define meshtastic_ModuleConfig_MQTTConfig_init_zero {0, "", "", "", 0, 0, 0, "", 0, 0, false, meshtastic_ModuleConfig_MapReportSettings_init_zero}
+#define meshtastic_ModuleConfig_MQTTConfig_init_zero {0, "", "", "", 0, 0, 0, "", 0, 0, false, meshtastic_ModuleConfig_MapReportSettings_init_zero, 0}
 #define meshtastic_ModuleConfig_MapReportSettings_init_zero {0, 0, 0}
 #define meshtastic_ModuleConfig_RemoteHardwareConfig_init_zero {0, 0, 0, {meshtastic_RemoteHardwarePin_init_zero, meshtastic_RemoteHardwarePin_init_zero, meshtastic_RemoteHardwarePin_init_zero, meshtastic_RemoteHardwarePin_init_zero}}
 #define meshtastic_ModuleConfig_NeighborInfoConfig_init_zero {0, 0, 0}
@@ -562,6 +566,7 @@ extern "C" {
 #define meshtastic_ModuleConfig_MQTTConfig_proxy_to_client_enabled_tag 9
 #define meshtastic_ModuleConfig_MQTTConfig_map_reporting_enabled_tag 10
 #define meshtastic_ModuleConfig_MQTTConfig_map_report_settings_tag 11
+#define meshtastic_ModuleConfig_MQTTConfig_forward_all_tag 12
 #define meshtastic_ModuleConfig_NeighborInfoConfig_enabled_tag 1
 #define meshtastic_ModuleConfig_NeighborInfoConfig_update_interval_tag 2
 #define meshtastic_ModuleConfig_NeighborInfoConfig_transmit_over_lora_tag 3
@@ -709,7 +714,8 @@ X(a, STATIC,   SINGULAR, BOOL,     tls_enabled,       7) \
 X(a, STATIC,   SINGULAR, STRING,   root,              8) \
 X(a, STATIC,   SINGULAR, BOOL,     proxy_to_client_enabled,   9) \
 X(a, STATIC,   SINGULAR, BOOL,     map_reporting_enabled,  10) \
-X(a, STATIC,   OPTIONAL, MESSAGE,  map_report_settings,  11)
+X(a, STATIC,   OPTIONAL, MESSAGE,  map_report_settings,  11) \
+X(a, STATIC,   SINGULAR, BOOL,     forward_all,       12)
 #define meshtastic_ModuleConfig_MQTTConfig_CALLBACK NULL
 #define meshtastic_ModuleConfig_MQTTConfig_DEFAULT NULL
 #define meshtastic_ModuleConfig_MQTTConfig_map_report_settings_MSGTYPE meshtastic_ModuleConfig_MapReportSettings
@@ -907,7 +913,7 @@ extern const pb_msgdesc_t meshtastic_RemoteHardwarePin_msg;
 #define meshtastic_ModuleConfig_CannedMessageConfig_size 49
 #define meshtastic_ModuleConfig_DetectionSensorConfig_size 44
 #define meshtastic_ModuleConfig_ExternalNotificationConfig_size 42
-#define meshtastic_ModuleConfig_MQTTConfig_size  224
+#define meshtastic_ModuleConfig_MQTTConfig_size  226
 #define meshtastic_ModuleConfig_MapReportSettings_size 14
 #define meshtastic_ModuleConfig_NeighborInfoConfig_size 10
 #define meshtastic_ModuleConfig_PaxcounterConfig_size 30
@@ -916,7 +922,7 @@ extern const pb_msgdesc_t meshtastic_RemoteHardwarePin_msg;
 #define meshtastic_ModuleConfig_SerialConfig_size 28
 #define meshtastic_ModuleConfig_StoreForwardConfig_size 24
 #define meshtastic_ModuleConfig_TelemetryConfig_size 48
-#define meshtastic_ModuleConfig_size             227
+#define meshtastic_ModuleConfig_size             229
 #define meshtastic_RemoteHardwarePin_size        21
 
 #ifdef __cplusplus
